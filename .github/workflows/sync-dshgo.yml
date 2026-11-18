@@ -54,6 +54,7 @@ jobs:
             https://github.com/ccch1mneyyy/dsh-Go.git /tmp/dshgo
           # 叠加问问Ai专属品牌资产（问问仔像素桌宠）与重塑引擎
           cp -r wenwen-builder/brand_assets /tmp/dshgo/brand_assets
+          mkdir -p /tmp/dshgo/scripts
           cp wenwen-builder/scripts/rebrand_wenwenai.py /tmp/dshgo/scripts/rebrand_wenwenai.py
 
       - name: 4. 安装 Pillow 并执行问问Ai幂等品牌重塑 + 防覆盖门禁自检
