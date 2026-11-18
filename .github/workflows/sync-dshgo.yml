@@ -1,0 +1,229 @@
+name: Sync Upstream & Build WenWenAi (dsh-Go) Release
+
+on:
+  schedule:
+    # 每天北京时间 10:30 与 22:30 自动巡检上游 ccch1mneyyy/dsh-Go 新版本
+    - cron: '30 2,14 * * *'
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: '即使当前 Tag 已发布也强制重新构建并发布'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: 3.47.7
+  JAVA_VERSION: '17'
+  TZ: Asia/Shanghai
+
+jobs:
+  sync-and-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: 1. 确定上游最新 Release Tag 并判断是否需要构建
+        id: upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=$(gh release view --repo ccch1mneyyy/dsh-Go --json tagName -q .tagName)
+          VER="${TAG#v}"
+          echo "Upstream latest release: ${TAG} (ver: ${VER})"
+          echo "upstream_tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "upstream_ver=${VER}" >> "$GITHUB_OUTPUT"
+          if gh release view "${TAG}" --repo tongwei0715/dsh-Go >/dev/null 2>&1 && [ "${{ github.event.inputs.force_build }}" != "true" ]; then
+            echo "Release ${TAG} already exists on tongwei0715/dsh-Go. Skipping."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 2. 检出上游源码与问问Ai品牌重塑引擎
+        if: steps.upstream.outputs.should_build == 'true'
+        run: |
+          git clone --depth 1 --branch "${{ steps.upstream.outputs.upstream_tag }}" \
+            https://github.com/ccch1mneyyy/dsh-Go.git /tmp/dshgo
+          mkdir -p /tmp/dshgo/scripts
+          curl -sSL -o /tmp/dshgo/scripts/rebrand_wenwenai.py \
+            https://raw.githubusercontent.com/tongwei0715/wenwenai-next/main/scripts/rebrand_wenwenai.py
+
+      - name: 3. 安装 Pillow 并执行问问Ai幂等品牌重塑 + 防覆盖门禁自检
+        if: steps.upstream.outputs.should_build == 'true'
+        run: |
+          python3 -m pip install --upgrade pip pillow
+          cd /tmp/dshgo
+          python3 scripts/rebrand_wenwenai.py \
+            --repo-root . \
+            --app-id "cn.wenwenai.app" \
+            --app-name "问问Ai" \
+            --app-name-en "Wenwen.ai" \
+            --slogan "遇事不决，问问Ai！" \
+            --slogan-en "When in doubt, ask Wenwen.ai!" \
+            --domain "wenwenai.cn" \
+            --github-repo "tongwei0715/dsh-Go"
+
+          # 品牌防覆盖硬核门禁自检
+          grep -q 'applicationId = "cn.wenwenai.app"' app/android/app/build.gradle.kts
+          grep -q 'android:label="问问Ai"' app/android/app/src/main/AndroidManifest.xml
+          grep -q "static const name = '问问Ai';" app/lib/state/app_info.dart
+          grep -q "万物皆插件 · 住在你手机里的全能智能体" app/lib/ui/onboarding/welcome_page.dart
+          grep -q "seed: Color(0xFF2F5BFF)" app/lib/ui/theme/accent.dart
+          echo "✅ 品牌防覆盖门禁自检全部通过！"
+
+      - name: 4. 提取上游 Release 预编译 Ubuntu+Node.js+DSH 运行时并校验完整性
+        if: steps.upstream.outputs.should_build == 'true'
+        run: |
+          TAG="${{ steps.upstream.outputs.upstream_tag }}"
+          VER="${{ steps.upstream.outputs.upstream_ver }}"
+          cd /tmp/dshgo
+          mkdir -p /tmp/upstream_apk runtime/out/arm64-v8a/assets runtime/out/arm64-v8a/jniLibs/arm64-v8a
+          curl -fSL --retry 3 -o /tmp/upstream_apk/upstream.apk \
+            "https://github.com/ccch1mneyyy/dsh-Go/releases/download/${TAG}/dsh-go-${VER}-arm64.apk"
+          unzip -o -q /tmp/upstream_apk/upstream.apk "assets/runtime/*" -d runtime/out/arm64-v8a/
+          unzip -o -j -q /tmp/upstream_apk/upstream.apk \
+            "lib/arm64-v8a/libproot.so" \
+            "lib/arm64-v8a/libproot-loader.so" \
+            "lib/arm64-v8a/libtalloc.so" \
+            "lib/arm64-v8a/libandroid-shmem.so" \
+            -d runtime/out/arm64-v8a/jniLibs/arm64-v8a/
+          unzip -o -j -q /tmp/upstream_apk/upstream.apk \
+            "lib/arm64-v8a/libtawcroot.so" \
+            -d runtime/out/arm64-v8a/jniLibs/arm64-v8a/ || true
+          mkdir -p runtime/out-tawcroot/jniLibs/arm64-v8a
+          cp -f runtime/out/arm64-v8a/jniLibs/arm64-v8a/libtawcroot.so runtime/out-tawcroot/jniLibs/arm64-v8a/ 2>/dev/null || true
+          if [ -f runtime/tawcroot/build.py ] && [ -f runtime/out-tawcroot/jniLibs/arm64-v8a/libtawcroot.so ]; then
+            printf '#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n' > runtime/tawcroot/build.py
+          fi
+          rm -rf /tmp/upstream_apk
+          python3 -I tooling/check_runtime_bundle.py arm64
+
+      - name: 5. 配置 JDK 17 与 Flutter
+        if: steps.upstream.outputs.should_build == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: 6. 安装 Flutter 工具链
+        if: steps.upstream.outputs.should_build == 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: 7. 写入专属永久签名密钥并编译正式版 arm64 APK
+        if: steps.upstream.outputs.should_build == 'true'
+        run: |
+          cd /tmp/dshgo
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/android/wenwen-release.jks
+          cat <<EOF > app/android/key.properties
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          storeFile=../wenwen-release.jks
+          EOF
+          VER="${{ steps.upstream.outputs.upstream_ver }}"
+          (cd app && flutter pub get && flutter gen-l10n)
+          bash tooling/build-apk.sh -f arm64 --build-name "${VER}" --keep-daemon \
+            -- --dart-define=DSH_UPDATE_MIRROR=https://wenwenai.cn \
+               --dart-define=DSH_UPDATE_FEED=https://wenwenai.cn/dsh-go/update.json
+          rm -f app/android/wenwen-release.jks app/android/key.properties
+
+      - name: 8. 生成 update.json / SHA256SUMS、发布 Release 并自动同步官网
+        if: steps.upstream.outputs.should_build == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SITE_PAT }}
+        run: |
+          TAG="${{ steps.upstream.outputs.upstream_tag }}"
+          VER="${{ steps.upstream.outputs.upstream_ver }}"
+          cd /tmp/dshgo
+
+          # 动态拉取上游真实 Release 更新日志并品牌化脱敏
+          python3 - <<PYEOF
+          import re, subprocess
+          raw = subprocess.check_output(
+              ["gh", "release", "view", "${TAG}", "--repo", "ccch1mneyyy/dsh-Go", "--json", "body", "-q", ".body"],
+              text=True,
+          ).strip()
+          if "### 中文" in raw:
+              raw = raw[raw.index("### 中文"):]
+          raw = re.sub(r"\n- \*\*验证情况。\*\*[^\n]*", "", raw)
+          raw = re.sub(r"\n- \*\*Testing\.\*\*[^\n]*", "", raw)
+          raw = (
+              raw.replace("https://github.com/ccch1mneyyy/dsh-go", "https://wenwenai.cn")
+              .replace("go.dshtui.com", "wenwenai.cn")
+              .replace("DSH Go", "问问Ai")
+              .replace("DSH-Go", "问问Ai")
+              .replace("dsh-go", "wenwen-ai")
+              .replace("Deepy 小鲸鱼", "问问仔")
+              .replace("Deepy", "问问仔")
+          )
+          raw = re.sub(r'(?<![A-Za-z0-9_$/-])DSH(?!\s*Remote)(?![A-Za-z0-9_/-])', "问问Ai", raw)
+          header = "### 问问Ai v${VER} 更新内容（官方网站 https://wenwenai.cn）\n\n"
+          with open("/tmp/notes.md", "w", encoding="utf-8") as f:
+              f.write(header + raw.strip() + "\n")
+          PYEOF
+
+          python3 tooling/release_assets.py \
+            --version "${VER}" \
+            --notes /tmp/notes.md \
+            --delta-from 0 \
+            --out dist
+
+          python3 - <<PYEOF
+          import json
+          from pathlib import Path
+          p = Path("dist/update.json")
+          d = json.loads(p.read_text(encoding="utf-8"))
+          d["assets"]["arm64"]["url"] = "https://github.com/tongwei0715/dsh-Go/releases/download/${TAG}/dsh-go-${VER}-arm64.apk"
+          p.write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          PYEOF
+
+          cp "dist/dsh-go-${VER}-arm64.apk" "dist/wenwen-ai-${VER}-arm64.apk"
+          (cd dist && sha256sum *.apk > SHA256SUMS)
+
+          if gh release view "${TAG}" --repo tongwei0715/dsh-Go >/dev/null 2>&1; then
+            gh release upload "${TAG}" dist/* --clobber --repo tongwei0715/dsh-Go
+          else
+            gh release create "${TAG}" dist/* --repo tongwei0715/dsh-Go -t "问问Ai ${TAG} 全能工作站版" -F /tmp/notes.md
+          fi
+
+          # 自动同步官网 wenwenai.cn (tongwei0715/WenWen-AI gh-pages)
+          git clone --depth 1 -b gh-pages "https://x-access-token:${SITE_PAT}@github.com/tongwei0715/WenWen-AI.git" /tmp/wenwen_site
+          cp dist/update.json /tmp/wenwen_site/dsh-go/update.json
+          cp dist/update.json /tmp/wenwen_site/update.json
+          python3 - <<PYEOF
+          import json, re
+          from pathlib import Path
+          u_data = json.loads(Path("dist/update.json").read_text(encoding="utf-8"))
+          idx = Path("/tmp/wenwen_site/index.html")
+          if idx.is_file():
+              html = idx.read_text(encoding="utf-8")
+              html = re.sub(r'releases/download/v[0-9.]+/wenwen-ai-[0-9.]+-arm64\.apk', f'releases/download/${TAG}/wenwen-ai-${VER}-arm64.apk', html)
+              html = re.sub(r'\[v1\.[0-9.]+\]', f'[v${VER}]', html)
+              html = re.sub(r'下载全能工作站版 v1\.[0-9.]+', f'下载全能工作站版 v${VER}', html)
+              html = re.sub(r'Download Full Workstation v1\.[0-9.]+', f'Download Full Workstation v${VER}', html)
+              html = re.sub(r'id="version-badge">v1\.[0-9.]+', f'id="version-badge">v${VER}', html)
+              html = re.sub(r'id="dl-full-tag">v1\.[0-9.]+', f'id="dl-full-tag">v${VER}', html)
+              size_mb = f"{u_data['assets']['arm64']['size'] / (1024 * 1024):.1f} MB"
+              html = re.sub(r'id="dl-full-size">[0-9.]+ MB · \.apk', f'id="dl-full-size">{size_mb} · .apk', html)
+              rel_js = "            // AUTO_RELEASE_INFO_START\n            let RELEASE_INFO = " + json.dumps({
+                  "version": u_data["version"],
+                  "tag": u_data["tag"],
+                  "publishedAt": u_data["publishedAt"],
+                  "size": u_data["assets"]["arm64"]["size"],
+                  "notes": u_data["notes"],
+              }, ensure_ascii=False) + ";\n            // AUTO_RELEASE_INFO_END"
+              html = re.sub(r' *// AUTO_RELEASE_INFO_START.*?// AUTO_RELEASE_INFO_END', lambda _: rel_js, html, flags=re.DOTALL)
+              idx.write_text(html, encoding="utf-8")
+          PYEOF
+          cd /tmp/wenwen_site
+          git config user.name "WenWenAi Bot"
+          git config user.email "bot@wenwenai.cn"
+          git add index.html dsh-go/update.json update.json
+          git commit -m "chore(auto-sync): 自动同步 问问Ai 全能版 ${TAG} 下载直链、真实更新日志与 OTA 清单" || true
+          git push origin gh-pages || true
