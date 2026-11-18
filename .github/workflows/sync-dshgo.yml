@@ -41,16 +41,22 @@ jobs:
             echo "should_build=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: 2. 检出上游源码与问问Ai品牌重塑引擎
+      - name: 2. 检出上游源码并叠加问问Ai品牌资产与重塑引擎
+        if: steps.upstream.outputs.should_build == 'true'
+        uses: actions/checkout@v4
+        with:
+          path: wenwen-builder
+
+      - name: 3. 拉取上游源码 + 复制品牌资产与重塑引擎
         if: steps.upstream.outputs.should_build == 'true'
         run: |
           git clone --depth 1 --branch "${{ steps.upstream.outputs.upstream_tag }}" \
             https://github.com/ccch1mneyyy/dsh-Go.git /tmp/dshgo
-          mkdir -p /tmp/dshgo/scripts
-          curl -sSL -o /tmp/dshgo/scripts/rebrand_wenwenai.py \
-            https://raw.githubusercontent.com/tongwei0715/wenwenai-next/main/scripts/rebrand_wenwenai.py
+          # 叠加问问Ai专属品牌资产（问问仔像素桌宠）与重塑引擎
+          cp -r wenwen-builder/brand_assets /tmp/dshgo/brand_assets
+          cp wenwen-builder/scripts/rebrand_wenwenai.py /tmp/dshgo/scripts/rebrand_wenwenai.py
 
-      - name: 3. 安装 Pillow 并执行问问Ai幂等品牌重塑 + 防覆盖门禁自检
+      - name: 4. 安装 Pillow 并执行问问Ai幂等品牌重塑 + 防覆盖门禁自检
         if: steps.upstream.outputs.should_build == 'true'
         run: |
           python3 -m pip install --upgrade pip pillow
@@ -73,7 +79,7 @@ jobs:
           grep -q "seed: Color(0xFF2F5BFF)" app/lib/ui/theme/accent.dart
           echo "✅ 品牌防覆盖门禁自检全部通过！"
 
-      - name: 4. 提取上游 Release 预编译 Ubuntu+Node.js+DSH 运行时并校验完整性
+      - name: 5. 提取上游 Release 预编译 Ubuntu+Node.js+DSH 运行时并校验完整性
         if: steps.upstream.outputs.should_build == 'true'
         run: |
           TAG="${{ steps.upstream.outputs.upstream_tag }}"
@@ -100,14 +106,14 @@ jobs:
           rm -rf /tmp/upstream_apk
           python3 -I tooling/check_runtime_bundle.py arm64
 
-      - name: 5. 配置 JDK 17 与 Flutter
+      - name: 6. 配置 JDK 17 与 Flutter
         if: steps.upstream.outputs.should_build == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
 
-      - name: 6. 安装 Flutter 工具链
+      - name: 7. 安装 Flutter 工具链
         if: steps.upstream.outputs.should_build == 'true'
         uses: subosito/flutter-action@v2
         with:
@@ -115,7 +121,7 @@ jobs:
           channel: stable
           cache: true
 
-      - name: 7. 写入专属永久签名密钥并编译正式版 arm64 APK
+      - name: 8. 写入专属永久签名密钥并编译正式版 arm64 APK
         if: steps.upstream.outputs.should_build == 'true'
         run: |
           cd /tmp/dshgo
@@ -133,7 +139,7 @@ jobs:
                --dart-define=DSH_UPDATE_FEED=https://wenwenai.cn/dsh-go/update.json
           rm -f app/android/wenwen-release.jks app/android/key.properties
 
-      - name: 8. 生成 update.json / SHA256SUMS、发布 Release 并自动同步官网
+      - name: 9. 生成 update.json / SHA256SUMS、发布 Release 并自动同步官网
         if: steps.upstream.outputs.should_build == 'true'
         env:
           GH_TOKEN: ${{ secrets.SITE_PAT }}
