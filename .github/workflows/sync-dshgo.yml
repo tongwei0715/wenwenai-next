@@ -200,7 +200,7 @@ jobs:
           fi
 
           # 自动同步官网 wenwenai.cn (tongwei0715/WenWen-AI gh-pages)
-          git clone --depth 1 -b gh-pages "https://x-access-token:${SITE_PAT}@github.com/tongwei0715/WenWen-AI.git" /tmp/wenwen_site
+          git clone --depth 1 -b gh-pages "https://x-access-token:${GH_TOKEN}@github.com/tongwei0715/WenWen-AI.git" /tmp/wenwen_site
           cp dist/update.json /tmp/wenwen_site/dsh-go/update.json
           cp dist/update.json /tmp/wenwen_site/update.json
           python3 - <<PYEOF
@@ -233,4 +233,4 @@ jobs:
           git config user.email "bot@wenwenai.cn"
           git add index.html dsh-go/update.json update.json
           git commit -m "chore(auto-sync): 自动同步 问问Ai 全能版 ${TAG} 下载直链、真实更新日志与 OTA 清单" || true
-          git push origin gh-pages || true
+          git push "https://x-access-token:${GH_TOKEN}@github.com/tongwei0715/WenWen-AI.git" gh-pages || true
