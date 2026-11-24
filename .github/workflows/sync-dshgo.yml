@@ -135,7 +135,7 @@ jobs:
           EOF
           VER="${{ steps.upstream.outputs.upstream_ver }}"
           (cd app && flutter pub get && flutter gen-l10n)
-          bash tooling/build-apk.sh -f arm64 --build-name "${VER}" --keep-daemon \
+          bash tooling/build-apk.sh -f arm64 --build-name "${VER}" --keep-daemon --no-companion \
             -- --dart-define=DSH_UPDATE_MIRROR=https://wenwenai.cn \
                --dart-define=DSH_UPDATE_FEED=https://wenwenai.cn/dsh-go/update.json
           rm -f app/android/wenwen-release.jks app/android/key.properties
