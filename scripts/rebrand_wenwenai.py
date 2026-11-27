@@ -772,6 +772,12 @@ def rebuild_whale_and_widgets(repo_root: Path, pet_src_dir: Path) -> None:
     es_dart = repo_root / "app" / "lib" / "ui" / "chat" / "empty_state.dart"
     if es_dart.is_file():
         etxt = es_dart.read_text(encoding="utf-8")
+        etxt = re.sub(
+            r"ThemeHeroStyle\.whale\s*=>\s*WhaleTail\(.*?\n      \),",
+            "ThemeHeroStyle.whale => const WhaleTail(\n        still: true,\n        height: 68,\n        color: Color(0xFFFFFFFF),\n      ),",
+            etxt,
+            flags=re.DOTALL,
+        )
         etxt = etxt.replace("color: whaleColorFor(theme.brightness).withValues(alpha: 0.4),", "color: const Color(0xFFFFFFFF),")
         etxt = etxt.replace("color: Colors.white,", "color: const Color(0xFFFFFFFF),")
         etxt = re.sub(
