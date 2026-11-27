@@ -18,6 +18,7 @@ env:
   FLUTTER_VERSION: 3.47.7
   JAVA_VERSION: '17'
   TZ: Asia/Shanghai
+  DSH_MAVEN_MIRRORS: '0'
 
 jobs:
   sync-and-release:
@@ -75,9 +76,17 @@ jobs:
           # 品牌防覆盖硬核门禁自检
           grep -q 'applicationId = "cn.wenwenai.app"' app/android/app/build.gradle.kts
           grep -q 'android:label="问问Ai"' app/android/app/src/main/AndroidManifest.xml
+          grep -q '<data android:scheme="wenwen" />' app/android/app/src/main/AndroidManifest.xml
           grep -q "static const name = '问问Ai';" app/lib/state/app_info.dart
           grep -q "万物皆插件 · 住在你手机里的全能智能体" app/lib/ui/onboarding/welcome_page.dart
           grep -q "seed: Color(0xFF2F5BFF)" app/lib/ui/theme/accent.dart
+          grep -q "height: 68," app/lib/ui/chat/empty_state.dart
+          grep -q "https://wenwenai.cn" app/lib/ui/settings/about_page.dart
+          grep -q "const dshGoProjectUrl = 'https://wenwenai.cn';" app/lib/ui/share/share_content.dart
+          grep -q "const shareFileExtension = 'wenwen';" app/lib/share_code/share_codec.dart
+          for v in "" "_night" "_frost" "_ink"; do
+            test -s "app/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher${v}.png"
+          done
           echo "✅ 品牌防覆盖门禁自检全部通过！"
 
       - name: 5. 提取上游 Release 预编译 Ubuntu+Node.js+DSH 运行时并校验完整性
@@ -158,8 +167,8 @@ jobs:
           ).strip()
           if "### 中文" in raw:
               raw = raw[raw.index("### 中文"):]
-          raw = re.sub(r"\n- \*\*验证情况。\*\*[^\n]*", "", raw)
-          raw = re.sub(r"\n- \*\*Testing\.\*\*[^\n]*", "", raw)
+          raw = re.sub(r"\n*#{3,4}\s*(?:验证情况|Testing)\b.*?(?=\n#{2,4}\s|\Z)", "", raw, flags=re.DOTALL)
+          raw = re.sub(r"\n- \*\*(?:验证情况|Testing)[。.]?\*\*[^\n]*", "", raw)
           raw = (
               raw.replace("https://github.com/ccch1mneyyy/dsh-go", "https://wenwenai.cn")
               .replace("go.dshtui.com", "wenwenai.cn")

@@ -1121,7 +1121,15 @@ def main():
     if gradle_kts.is_file():
         gtxt = gradle_kts.read_text(encoding="utf-8")
         gtxt = re.sub(r'applicationId\s*=\s*"[^"]+"', f'applicationId = "{args.app_id}"', gtxt)
+        gtxt = gtxt.replace('android:targetPackage=\"io.github.ccch1mneyyy.dsh_app\"', f'android:targetPackage=\"{args.app_id}\"')
+        gtxt = gtxt.replace('android:targetPackage=\"io.github.ccch1mneyyy.dsh_app${suffix.get()}\"', f'android:targetPackage=\"{args.app_id}${{suffix.get()}}\"')
         gradle_kts.write_text(gtxt, encoding="utf-8")
+
+    shortcuts_xml = root / "app" / "android" / "app" / "src" / "main" / "res" / "xml" / "shortcuts.xml"
+    if shortcuts_xml.is_file():
+        stxt = shortcuts_xml.read_text(encoding="utf-8")
+        stxt = stxt.replace('android:targetPackage="io.github.ccch1mneyyy.dsh_app"', f'android:targetPackage="{args.app_id}"')
+        shortcuts_xml.write_text(stxt, encoding="utf-8")
 
     manifest_xml = root / "app" / "android" / "app" / "src" / "main" / "AndroidManifest.xml"
     if manifest_xml.is_file():
